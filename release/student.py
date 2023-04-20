@@ -1,6 +1,9 @@
 # Please place imports here.
 # BEGIN IMPORTS
-
+import numpy as np
+import cv2
+import scipy
+from scipy import ndimage
 # END IMPORTS
 
 
@@ -27,7 +30,37 @@ def compute_photometric_stereo_impl(lights, images):
         normals -- float32 height x width x 3 image with dimensions matching
                    the input images.
     """
-    raise NotImplementedError()
+    img_shape = images[0].shape
+    n = len(images)
+
+    I = np.zeros((img_shape[0], img_shape[1],n))
+    I = np.dstack([images[i][:, :, 0] for i in range(n)])
+
+    G = np.matmul(np.matmul(I, np.transpose(lights)), np.linalg.inv(np.matmul(lights, np.transpose(lights))))
+
+    kd = np.linalg.norm(G, axis=2)
+    kd = np.where(kd == 0, 1e-7, kd)  
+    normals = G / kd[:,:,np.newaxis]
+    normals[kd == 0] = 0  
+
+    num = np.zeros(img_shape)
+    den = np.zeros(img_shape)
+
+    for j in range(n):
+        currChannel = images[j]
+        
+        num += np.dot(normals, lights[:, j])[..., np.newaxis] * currChannel
+        den += np.square(np.dot(normals, lights[:, j]))[..., np.newaxis]
+
+    den[den == 0] = 1
+    albedo = np.divide(num, den, where=den > 0)
+
+    mask = np.linalg.norm(albedo, axis=2) < 1e-7
+    albedo[mask] = 0
+    normals[mask] = 0
+
+    return albedo.astype(np.float32), normals.astype(np.float32)
+    
 
 
 def pyrdown_impl(image):
