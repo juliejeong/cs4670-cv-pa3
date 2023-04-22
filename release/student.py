@@ -156,8 +156,19 @@ def project_impl(K, Rt, points):
     Output:
         projections -- height x width x 2 array of 2D projections
     """
-    raise NotImplementedError()
+    height, width, _ = np.shape(points)
+    proj = np.zeros((height, width, 2))
 
+    for i in range(height):
+        for j in range(width):
+            location = np.matmul(K, np.matmul(Rt, np.append(points[i,j], 1)))
+
+            if location[2] < 1e-7:
+                proj[i, j] = [np.nan, np.nan]
+            else:
+                proj[i, j] = location[:2] / location[2]
+
+    return proj
 
 def unproject_corners_impl(K, width, height, depth, Rt):
     """
@@ -204,7 +215,23 @@ def unproject_corners_impl(K, width, height, depth, Rt):
     Output:
         points -- 2 x 2 x 3 array of 3D points
     """
-    raise NotImplementedError()
+    corners = np.array([[[0, 0, 1], [width, 0, 1]], [[0, height, 1], [width, height, 1]]])
+    corners = np.matmul(np.linalg.inv(K), corners.reshape(4, 3, 1)).reshape(2, 2, 3) * depth
+
+    R = np.zeros((4,3))
+    t = np.ones((4,1))
+
+    R[:3] = Rt[:, :3]
+    t[:3, 0] = Rt[:, 3]
+
+    corners_mod = np.full((2, 2, 4), 1)
+    corners_mod[..., :3] = corners[..., :3]
+
+    for i, j in np.ndindex(corners.shape[:2]):
+        corners_ij = corners_mod[i, j, np.newaxis].T
+        corners[i, j] = ((R.T).dot(corners_ij) - (R.T).dot(t))[:, 0]
+
+    return corners
 
 
 def preprocess_ncc_impl(image, ncc_size):
@@ -254,7 +281,7 @@ def preprocess_ncc_impl(image, ncc_size):
     Output:
         normalized -- heigth x width x (channels * ncc_size**2) array
     """
-    raise NotImplementedError()
+    raise NotImplementedError
 
 
 def compute_ncc_impl(image1, image2):
@@ -269,4 +296,5 @@ def compute_ncc_impl(image1, image2):
         ncc -- height x width normalized cross correlation between image1 and
                image2.
     """
-    raise NotImplementedError()
+    
+    return np.sum(image1 * image2, axis=2)
