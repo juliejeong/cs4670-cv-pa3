@@ -91,7 +91,17 @@ def pyrdown_impl(image):
         down -- ceil(height/2) x ceil(width/2) x channels image of type
                 float32.
     """
-    raise NotImplementedError()
+    K = np.array([1, 4, 6, 4, 1]) / 16.0
+
+    img_filt = cv2.filter2D(image, -1, K, borderType = cv2.BORDER_REFLECT_101)
+    img_filt = cv2.filter2D(img_filt, -1, K.transpose(), borderType=cv2.BORDER_REFLECT_101)
+
+    down = img_filt[::2, ::2]
+
+    if down.ndim == 2:
+        down = down[..., np.newaxis]
+
+    return down
 
 
 def pyrup_impl(image):
@@ -117,8 +127,23 @@ def pyrup_impl(image):
     Output:
         up -- 2*height x 2*width x channels image of type float32.
     """
-    raise NotImplementedError()
+    img_shape = image.shape
 
+    new_shape = (2 * img_shape[0], 2 * img_shape[1])
+    if len(img_shape) == 2:
+        new_shape += (1,)
+    else:
+        new_shape += (img_shape[2],)
+
+    new_img = np.zeros(new_shape)
+    new_img[::2, ::2] = image
+
+    K = np.array([1.0, 4.0, 6.0, 4.0, 1.0]) / 8.0
+    K = np.reshape(K, (-1, 1))
+    img_filt = cv2.filter2D(new_img, -1, K, borderType=cv2.BORDER_REFLECT_101)
+    img_filt = cv2.filter2D(img_filt, -1, K.transpose(), borderType=cv2.BORDER_REFLECT_101)
+
+    return new_img
 
 def project_impl(K, Rt, points):
     """
