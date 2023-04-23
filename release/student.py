@@ -281,7 +281,37 @@ def preprocess_ncc_impl(image, ncc_size):
     Output:
         normalized -- heigth x width x (channels * ncc_size**2) array
     """
-    raise NotImplementedError
+    img_shape = image.shape
+    ans = np.zeros([img_shape[0], img_shape[1], img_shape[2] * ncc_size * ncc_size])
+    low = - (ncc_size // 2)
+    high = ncc_size // 2
+
+    for y in range(img_shape[0]):
+        for x in range(img_shape[1]):
+            condition = (
+            y + low >= 0 and
+            x + low >= 0 and
+            y + high < img_shape[0] and
+            x + high < img_shape[1]
+            )
+
+            if condition:
+                for k in range(img_shape[2]):
+                    patch = image[y + low : y + high + 1, x + low : x + high + 1, k]
+                    flat_patch = patch.reshape(-1)
+                    start = k * ncc_size * ncc_size
+                    end = (k + 1) * ncc_size * ncc_size
+                    ans[y, x, start:end] = np.asarray(flat_patch)
+
+    ans -= np.mean(ans, axis=2)[:,:,np.newaxis]
+
+    norm = np.linalg.norm(ans, axis=2)[:,:, np.newaxis]
+    norm[norm == 0] = 1
+    ans /= norm
+
+    return ans
+
+
 
 
 def compute_ncc_impl(image1, image2):
