@@ -59,7 +59,7 @@ def compute_photometric_stereo_impl(lights, images):
     albedo[mask] = 0
     normals[mask] = 0
 
-    return albedo.astype(np.float32), normals.astype(np.float32)
+    return albedo, normals
     
 
 
@@ -170,6 +170,7 @@ def project_impl(K, Rt, points):
 
     return proj
 
+
 def unproject_corners_impl(K, width, height, depth, Rt):
     """
     Undo camera projection given a calibrated camera and the depth for each
@@ -220,16 +221,19 @@ def unproject_corners_impl(K, width, height, depth, Rt):
 
     R = np.zeros((4,3))
     t = np.ones((4,1))
-
     R[:3] = Rt[:, :3]
     t[:3, 0] = Rt[:, 3]
 
     corners_mod = np.full((2, 2, 4), 1)
     corners_mod[..., :3] = corners[..., :3]
 
-    for i, j in np.ndindex(corners.shape[:2]):
-        corners_ij = corners_mod[i, j, np.newaxis].T
-        corners[i, j] = ((R.T).dot(corners_ij) - (R.T).dot(t))[:, 0]
+    temp = np.ones([2, 2, 4])
+    temp[:, :, :3] = corners
+    
+    corners = np.zeros((2, 2, 3))
+    for idx, _ in np.ndenumerate(corners):
+        i, j, _ = idx
+        corners[i, j] = ((R.T).dot(temp[i, j, np.newaxis].T) - (R.T).dot(t))[:, 0]
 
     return corners
 
@@ -312,8 +316,6 @@ def preprocess_ncc_impl(image, ncc_size):
     return ans
 
 
-
-
 def compute_ncc_impl(image1, image2):
     """
     Compute normalized cross correlation between two images that already have
@@ -326,5 +328,5 @@ def compute_ncc_impl(image1, image2):
         ncc -- height x width normalized cross correlation between image1 and
                image2.
     """
-    
     return np.sum(image1 * image2, axis=2)
+
