@@ -33,22 +33,23 @@ def compute_photometric_stereo_impl(lights, images):
     img_shape = images[0].shape
     n = len(images)
 
-    I = np.zeros((img_shape[0], img_shape[1],n))
+    I = np.zeros((img_shape[0], img_shape[1], n))
     I = np.dstack([images[i][:, :, 0] for i in range(n)])
 
-    G = np.matmul(np.matmul(I, np.transpose(lights)), np.linalg.inv(np.matmul(lights, np.transpose(lights))))
+    G = np.matmul(np.matmul(I, np.transpose(lights)), np.linalg.inv(
+        np.matmul(lights, np.transpose(lights))))
 
     kd = np.linalg.norm(G, axis=2)
-    kd = np.where(kd == 0, 1e-7, kd)  
-    normals = G / kd[:,:,np.newaxis]
-    normals[kd == 0] = 0  
+    kd = np.where(kd == 0, 1e-7, kd)
+    normals = G / kd[:, :, np.newaxis]
+    normals[kd == 0] = 0
 
     num = np.zeros(img_shape)
     den = np.zeros(img_shape)
 
     for j in range(n):
         currChannel = images[j]
-        
+
         num += np.dot(normals, lights[:, j])[..., np.newaxis] * currChannel
         den += np.square(np.dot(normals, lights[:, j]))[..., np.newaxis]
 
@@ -59,8 +60,7 @@ def compute_photometric_stereo_impl(lights, images):
     albedo[mask] = 0
     normals[mask] = 0
 
-    return albedo, normals
-    
+    return albedo.astype(np.float32), normals.astype(np.float32)
 
 
 def pyrdown_impl(image):
@@ -93,8 +93,10 @@ def pyrdown_impl(image):
     """
     K = np.array([1, 4, 6, 4, 1]) / 16.0
 
-    img_filt = cv2.filter2D(image, -1, K, borderType = cv2.BORDER_REFLECT_101)
-    img_filt = cv2.filter2D(img_filt, -1, K.transpose(), borderType=cv2.BORDER_REFLECT_101)
+    img_filt = cv2.filter2D(
+        image, -1, K[:, np.newaxis], borderType=cv2.BORDER_REFLECT_101)
+    img_filt = cv2.filter2D(img_filt, -1, K[:, np.newaxis].transpose(),
+                            borderType=cv2.BORDER_REFLECT_101)
 
     down = img_filt[::2, ::2]
 
@@ -139,12 +141,19 @@ def pyrup_impl(image):
     new_img[::2, ::2] = image
 
     K = np.array([1.0, 4.0, 6.0, 4.0, 1.0]) / 8.0
-    K = np.reshape(K, (-1, 1))
-    img_filt = cv2.filter2D(new_img, -1, K, borderType=cv2.BORDER_REFLECT_101)
-    img_filt = cv2.filter2D(img_filt, -1, K.transpose(), borderType=cv2.BORDER_REFLECT_101)
+    # K = np.reshape(K, (-1, 1))
+    img_filt = cv2.filter2D(
+        new_img, -1, K[:, np.newaxis], borderType=cv2.BORDER_REFLECT_101)
+    img_filt = cv2.filter2D(img_filt, -1, K[:, np.newaxis].transpose(),
+                            borderType=cv2.BORDER_REFLECT_101)
 
-    return new_img
+    if img_filt.ndim == 2:
+        img_filt = img_filt[..., np.newaxis]
 
+    return img_filt
+
+
+# vectorize to improve run time
 def project_impl(K, Rt, points):
     """
     Project 3D points into a calibrated camera.
@@ -161,11 +170,9 @@ def project_impl(K, Rt, points):
 
     for i in range(height):
         for j in range(width):
-            location = np.matmul(K, np.matmul(Rt, np.append(points[i,j], 1)))
+            location = np.matmul(K, np.matmul(Rt, np.append(points[i, j], 1)))
 
-            if location[2] < 1e-7:
-                proj[i, j] = [np.nan, np.nan]
-            else:
+            if location[2] >= 1e-7:
                 proj[i, j] = location[:2] / location[2]
 
     return proj
@@ -216,24 +223,27 @@ def unproject_corners_impl(K, width, height, depth, Rt):
     Output:
         points -- 2 x 2 x 3 array of 3D points
     """
-    corners = np.array([[[0, 0, 1], [width, 0, 1]], [[0, height, 1], [width, height, 1]]])
-    corners = np.matmul(np.linalg.inv(K), corners.reshape(4, 3, 1)).reshape(2, 2, 3) * depth
+    corners = np.array([[0., 0., 1.], [width*1., 0., 1.],
+                       [0., height*1., 1.], [width*1., height*1., 1.]]).reshape(2, 2, 3)
+    # corners = np.matmul(np.linalg.inv(K), corners.reshape(
+    #     4, 3, 1)).reshape(2, 2, 3) * depth
+    corners = np.tensordot(corners, np.linalg.inv(K).T, axes=1)
+    corners = corners * depth
+    # R = np.zeros((4, 3))
+    # t = np.ones((4, 1))
 
-    R = np.zeros((4,3))
-    t = np.ones((4,1))
-    R[:3] = Rt[:, :3]
-    t[:3, 0] = Rt[:, 3]
+    R = Rt[:3, :3]
+    t = Rt[:3, 3]
 
-    corners_mod = np.full((2, 2, 4), 1)
-    corners_mod[..., :3] = corners[..., :3]
+    corners = np.tensordot(corners, R, axes=1)
+    corners = corners - R.T.dot(t)
 
-    temp = np.ones([2, 2, 4])
-    temp[:, :, :3] = corners
-    
-    corners = np.zeros((2, 2, 3))
-    for idx, _ in np.ndenumerate(corners):
-        i, j, _ = idx
-        corners[i, j] = ((R.T).dot(temp[i, j, np.newaxis].T) - (R.T).dot(t))[:, 0]
+    # corners_mod = np.full((2, 2, 4), 1)
+    # corners_mod[..., :3] = corners[..., :3]
+
+    # for i, j in np.ndindex(corners.shape[:2]):
+    #     corners_ij = corners_mod[i, j, np.newaxis].T
+    #     corners[i, j] = ((R.T).dot(corners_ij) - (R.T).dot(t))[:, 0]
 
     return corners
 
@@ -286,30 +296,32 @@ def preprocess_ncc_impl(image, ncc_size):
         normalized -- heigth x width x (channels * ncc_size**2) array
     """
     img_shape = image.shape
-    ans = np.zeros([img_shape[0], img_shape[1], img_shape[2] * ncc_size * ncc_size])
+    ans = np.zeros([img_shape[0], img_shape[1],
+                   img_shape[2] * ncc_size * ncc_size])
     low = - (ncc_size // 2)
     high = ncc_size // 2
 
     for y in range(img_shape[0]):
         for x in range(img_shape[1]):
             condition = (
-            y + low >= 0 and
-            x + low >= 0 and
-            y + high < img_shape[0] and
-            x + high < img_shape[1]
+                y + low >= 0 and
+                x + low >= 0 and
+                y + high < img_shape[0] and
+                x + high < img_shape[1]
             )
 
             if condition:
                 for k in range(img_shape[2]):
-                    patch = image[y + low : y + high + 1, x + low : x + high + 1, k]
+                    patch = image[y + low: y + high +
+                                  1, x + low: x + high + 1, k]
                     flat_patch = patch.reshape(-1)
                     start = k * ncc_size * ncc_size
                     end = (k + 1) * ncc_size * ncc_size
                     ans[y, x, start:end] = np.asarray(flat_patch)
 
-    ans -= np.mean(ans, axis=2)[:,:,np.newaxis]
+    ans -= np.mean(ans, axis=2)[:, :, np.newaxis]
 
-    norm = np.linalg.norm(ans, axis=2)[:,:, np.newaxis]
+    norm = np.linalg.norm(ans, axis=2)[:, :, np.newaxis]
     norm[norm == 0] = 1
     ans /= norm
 
@@ -328,5 +340,5 @@ def compute_ncc_impl(image1, image2):
         ncc -- height x width normalized cross correlation between image1 and
                image2.
     """
-    return np.sum(image1 * image2, axis=2)
 
+    return np.sum(image1 * image2, axis=2)
